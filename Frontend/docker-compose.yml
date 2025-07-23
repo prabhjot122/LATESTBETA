@@ -1,0 +1,226 @@
+version: '3.8'
+
+# Production Docker Compose for LawVriksh Full-Stack Application
+# Domain: https://lawvriksh.com
+# API: https://lawvriksh.com/api
+# Optimized for Kali Linux VPS deployment
+
+services:
+  # MySQL Database - Custom port for security
+  mysql:
+    image: mysql:8.0
+    container_name: lawvriksh-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: Sahil@123
+      MYSQL_DATABASE: lawvriksh_referral
+      MYSQL_USER: root
+      MYSQL_PASSWORD: Sahil@123
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./BetajoiningBackend/lawdata.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./logs/mysql:/var/log/mysql
+    ports:
+      - "127.0.0.1:3307:3306"  # Custom port 3307 for security
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --innodb-buffer-pool-size=512M
+      --max-connections=200
+      --slow-query-log=1
+      --slow-query-log-file=/var/log/mysql/slow.log
+      --long-query-time=2
+      --innodb-log-file-size=256M
+      --innodb-flush-log-at-trx-commit=2
+      --query-cache-type=1
+      --query-cache-size=64M
+    networks:
+      - lawvriksh-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pSahil@123"]
+      timeout: 20s
+      retries: 10
+      interval: 30s
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  # Redis Cache for session storage and caching
+  redis:
+    image: redis:7-alpine
+    container_name: lawvriksh-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass "Sahil@123" --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+      - ./logs/redis:/var/log/redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    networks:
+      - lawvriksh-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+
+  # FastAPI Backend Application
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      args:
+        - BUILD_ENV=production
+    container_name: lawvriksh-backend
+    restart: unless-stopped
+    env_file:
+      - ./BetajoiningBackend/.env.production
+      
+    volumes:
+      - ./cache:/app/cache
+      - ./logs/backend:/app/logs
+      - ./uploads:/app/uploads
+    ports:
+      - "127.0.0.1:8000:8000"  # Only bind to localhost
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - lawvriksh-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+  # React Frontend Application
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        - BUILD_ENV=production
+        - VITE_API_URL=https://lawvriksh.com/api
+    container_name: lawvriksh-frontend
+    restart: unless-stopped
+    env_file:
+      - ./.env.production
+    volumes:
+      - ./logs/frontend:/var/log/nginx
+    ports:
+      - "80:80"   # HTTP port
+      - "443:443" # HTTPS port (for SSL termination)
+    depends_on:
+      - backend
+    networks:
+      - lawvriksh-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+
+  # Celery Worker for Background Tasks
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      args:
+        - BUILD_ENV=production
+    container_name: lawvriksh-celery-worker
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
+    env_file:
+      - ./BetajoiningBackend/.env.production
+    volumes:
+      - ./cache:/app/cache
+      - ./logs/celery:/app/logs
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - lawvriksh-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.25'
+
+  # Celery Beat Scheduler
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      args:
+        - BUILD_ENV=production
+    container_name: lawvriksh-celery-beat
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    env_file:
+      - ./BetajoiningBackend/.env.production
+    volumes:
+      - ./cache:/app/cache
+      - ./logs/celery-beat:/app/logs
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - lawvriksh-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.1'
+
+# Networks
+networks:
+  lawvriksh-network:
+    driver: bridge
+    name: lawvriksh-network
+
+# Volumes for data persistence
+volumes:
+  mysql_data:
+    driver: local
+    name: lawvriksh-mysql-data
+  redis_data:
+    driver: local
+    name: lawvriksh-redis-data

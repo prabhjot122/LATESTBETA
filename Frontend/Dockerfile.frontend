@@ -1,0 +1,73 @@
+# Production Dockerfile for LawVriksh Frontend
+# Multi-stage build for optimized React/Vite application
+# Target: https://lawvriksh.com
+
+# Build stage
+FROM node:18-alpine as builder
+
+# Set build arguments
+ARG BUILD_ENV=production
+ARG VITE_API_URL=https://lawvriksh.com/api
+
+# Set working directory
+WORKDIR /app
+
+# Install dependencies for building
+RUN apk add --no-cache \
+    git \
+    python3 \
+    make \
+    g++
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --only=production --silent
+
+# Copy source code
+COPY . .
+
+# Set environment variables for build
+ENV NODE_ENV=production
+ENV VITE_API_URL=$VITE_API_URL
+
+# Build the application
+RUN npm run build
+
+# Production stage with Nginx
+FROM nginx:1.25-alpine
+
+# Install security updates and curl for health checks
+RUN apk update && apk upgrade && \
+    apk add --no-cache curl && \
+    rm -rf /var/cache/apk/*
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S lawvriksh && \
+    adduser -S lawvriksh -u 1001 -G lawvriksh
+
+# Copy built application from builder stage
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Copy custom Nginx configuration
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY default.conf /etc/nginx/conf.d/default.conf
+
+# Create necessary directories and set permissions
+RUN mkdir -p /var/cache/nginx /var/log/nginx /var/run && \
+    chown -R lawvriksh:lawvriksh /var/cache/nginx /var/log/nginx /var/run /usr/share/nginx/html && \
+    chmod -R 755 /usr/share/nginx/html
+
+# Switch to non-root user
+USER lawvriksh
+
+# Expose port
+EXPOSE 80
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:80/ || exit 1
+
+# Start Nginx
+CMD ["nginx", "-g", "daemon off;"]

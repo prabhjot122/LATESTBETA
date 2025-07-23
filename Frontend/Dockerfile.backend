@@ -1,0 +1,92 @@
+# Production Dockerfile for LawVriksh Backend
+# Multi-stage build for optimized FastAPI application
+# Target: https://lawvriksh.com/api
+
+# Build stage
+FROM python:3.11-slim as builder
+
+# Set build arguments
+ARG BUILD_ENV=production
+
+# Install system dependencies for building
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    gcc \
+    g++ \
+    libffi-dev \
+    libssl-dev \
+    libmysqlclient-dev \
+    pkg-config \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create virtual environment
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Upgrade pip and install wheel
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Copy requirements files
+COPY BetajoiningBackend/requirements.txt BetajoiningBackend/requirements.production.txt ./
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.production.txt
+
+# Production stage
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PATH="/opt/venv/bin:$PATH"
+ENV ENVIRONMENT=production
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    libmysqlclient21 \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create non-root user for security
+RUN groupadd -r lawvriksh && useradd -r -g lawvriksh -d /app -s /bin/bash lawvriksh
+
+# Copy virtual environment from builder stage
+COPY --from=builder /opt/venv /opt/venv
+
+# Set working directory
+WORKDIR /app
+
+# Copy application code
+COPY --chown=lawvriksh:lawvriksh BetajoiningBackend/ .
+
+# Create necessary directories and set permissions
+RUN mkdir -p /app/logs /app/cache /app/uploads /app/migrations \
+    && chown -R lawvriksh:lawvriksh /app \
+    && chmod -R 755 /app
+
+# Switch to non-root user
+USER lawvriksh
+
+# Expose port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Default command - optimized for production
+CMD ["gunicorn", "app.main:app", \
+     "--worker-class", "uvicorn.workers.UvicornWorker", \
+     "--workers", "4", \
+     "--bind", "0.0.0.0:8000", \
+     "--access-logfile", "/app/logs/access.log", \
+     "--error-logfile", "/app/logs/error.log", \
+     "--log-level", "info", \
+     "--timeout", "120", \
+     "--keep-alive", "5", \
+     "--max-requests", "1000", \
+     "--max-requests-jitter", "100", \
+     "--preload"]
