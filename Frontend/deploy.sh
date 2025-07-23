@@ -62,17 +62,17 @@ if [ ! -f .env.production ]; then
     error "Frontend .env.production file not found!"
 fi
 
-if [ ! -f BetajoiningBackend/.env.production ]; then
+if [ ! -f ../.env.production ]; then
     error "Backend .env.production file not found!"
 fi
 
 # Validate backend environment file
 log "Validating backend environment configuration..."
-if ! grep -q "MYSQL_ROOT_PASSWORD=" BetajoiningBackend/.env.production; then
+if ! grep -q "MYSQL_ROOT_PASSWORD=" ../.env.production; then
     error "MYSQL_ROOT_PASSWORD not found in backend .env.production file"
 fi
 
-if ! grep -q "JWT_SECRET_KEY=" BetajoiningBackend/.env.production; then
+if ! grep -q "JWT_SECRET_KEY=" ../.env.production; then
     error "JWT_SECRET_KEY not found in backend .env.production file"
 fi
 
