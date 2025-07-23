@@ -11,10 +11,7 @@ echo "🔧 Making all deployment scripts executable..."
 
 # List of scripts to make executable
 scripts=(
-    "deploy.sh"
-    "setup-production.sh"
-    "start-services.sh"
-    "backup.sh"
+    "Frontend/deploy.sh"
     "health-check.sh"
     "make-executable.sh"
 )
@@ -33,8 +30,8 @@ echo ""
 echo "🎉 All deployment scripts are now executable!"
 echo ""
 echo "📋 Next steps:"
-echo "1. Run: ./deploy.sh"
-echo "2. Run: ./setup-production.sh"
-echo "3. Run: ./start-services.sh"
+echo "1. Run: ./Frontend/deploy.sh (for full-stack deployment)"
+echo "2. Run: docker-compose -f docker-compose.production.yml up -d (for backend only)"
+echo "3. Run: ./health-check.sh (to verify services)"
 echo ""
 echo "📚 For detailed instructions, see: DEPLOYMENT_GUIDE.md"
